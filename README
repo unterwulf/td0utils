@@ -1,0 +1,31 @@
+td0utils
+========
+
+Copyright (c) 2021 Vitaly Sinilin <vs@kp4.ru>
+
+Published under the terms of the MIT License.
+
+This package contains a pickle and utils for working with TeleDisk's TD0 format
+images using GNU poke.
+
+It was created using the Teledisk Image File Format Notes by Dave Dunfield [1].
+
+Installation
+============
+
+In order to use these tools you will need GNU poke 1.2. You can just run them
+from the source directory or you can use the following command under super
+user to install them system-wide (tune PREFIX value, default is /usr/local):
+
+  $ make PREFIX=/usr install
+
+Known issues
+============
+
+td02ima works painfully slow. It takes about 10 seconds to convert 720K image
+on a recent hardware. Contact me if you know what is wrong with it.
+
+Links
+=====
+
+[1] http://dunfield.classiccmp.org/img47321/td0notes.txt

@@ -1,0 +1,99 @@
+#!/usr/bin/poke -L
+!#
+/* (c) 2021 Vitaly Sinilin.  */
+
+load teledisk;
+
+if (argv'length != 2) {
+    print "usage: td02ima SRCIMAGE.td0 TGTIMAGE.ima\n";
+    exit(1);
+}
+
+var filename = argv[0];
+var outfilename = argv[1];
+
+try {
+    var src = open(filename, IOS_M_RDONLY);
+    var dst = open(outfilename, IOS_F_WRITE | IOS_F_CREATE);
+    var ihdr = TD_img_hdr @ src : 0#B;
+    var offset = ihdr'size;
+    var outoff = 0#B;
+
+    if (ihdr.has_comment) {
+        var chdr = TD_comment_hdr @ offset;
+        offset += chdr'size;
+    }
+
+    while (offset < iosize(src)) {
+        var thdr = TD_track_hdr @ offset;
+        offset += thdr'size;
+
+        if (thdr.nr_sectors == 255)
+            break;
+
+        for (var sec = 0; sec < thdr.nr_sectors; sec++) {
+            var shdr = TD_sector_hdr @ offset;
+            offset += shdr'size;
+            var sdhdr = TD_sector_data_hdr @ offset;
+            var datalen = (sdhdr.len - 1)#B;
+            offset += sdhdr'size;
+
+            if (sdhdr.enc == 0) {
+                copy :from_ios src :from offset :to_ios dst :to outoff
+                     :size datalen;
+                outoff += datalen;
+            } else if (sdhdr.enc == 1) {
+                var nr_entries = datalen / (TD_data_enc_1 {})'size;
+                var left = 128 <<. shdr.size;
+                var rules = TD_data_enc_1[nr_entries] @ offset;
+
+                while (left > 0) {
+                    for (rule in rules) {
+                        for (var i = 0; left > 0 && i < rule.count; i++) {
+                            copy :from_ios src :from rule.pattern'offset
+                                 :to_ios dst :to outoff
+                                 :size rule.pattern'size;
+                            outoff += rule.pattern'size;
+                            left -= rule.pattern'size/#B;
+                        }
+                    }
+                }
+            } else if (sdhdr.enc == 2) {
+                while (datalen > 0#B) {
+                    var rule = TD_data_enc_2 @ offset;
+                    var len = rule.len;
+                    var count = rule.count;
+                    offset += rule'size;
+                    datalen -= rule'size;
+
+                    for (var i = 0; i < count; i++) {
+                        copy :from_ios src :from offset :to_ios dst :to outoff
+                             :size len;
+                        outoff += len;
+                    }
+
+                    offset += len;
+                    datalen -= len;
+                }
+                outoff += datalen;
+            } else {
+                printf "error: unknown sector encoding method (%u8d)\n",
+                       sdhdr.enc;
+                exit(1);
+            }
+            offset += datalen;
+        }
+    }
+
+    close(src);
+    close(dst);
+} catch (Exception e) {
+    if (e == E_constraint)
+        printf "error: `%s' is not a valid Teledisk image\n", filename;
+    else if (e == E_io)
+        printf "error: couldn't open file `%s'\n", filename;
+    else
+        raise e;
+
+    exit(1);
+}

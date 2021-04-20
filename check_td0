@@ -1,0 +1,88 @@
+#!/usr/bin/poke -L
+!#
+/* (c) 2021 Vitaly Sinilin.  */
+
+load teledisk;
+
+if (argv'length != 1) {
+    print "usage: check_td0 IMAGE.td0\n";
+    exit(1);
+}
+
+var filename = argv[0];
+
+try {
+    var fd = open(filename, IOS_M_RDONLY);
+    var ihdr = TD_img_hdr @ fd : 0#B;
+    var offset = ihdr'size;
+    if (ihdr.has_comment) {
+        var chdr = TD_comment_hdr @ offset;
+        offset += chdr'size;
+    }
+
+    var next_track = 0;
+    var nr_sectors = 0;
+    var prev_sec_size = 0;
+    while (offset < iosize(fd)) {
+        var thdr = TD_track_hdr @ offset;
+        offset += thdr'size;
+
+        if (thdr.nr_sectors == 255)
+            continue;
+        if (thdr.track != next_track) {
+            printf "Gap in track numbers (expected %u8d, actual %u8d)\n",
+                   next_track, thdr.track;
+        }
+        if (nr_sectors && thdr.nr_sectors != nr_sectors) {
+            printf "Number of sectors changed on track %u8d from %u8d to %u8d\n",
+                   thdr.track, nr_sectors, thdr.nr_sectors;
+        }
+
+        nr_sectors = thdr.nr_sectors;
+        if (ihdr.sides == 1 || thdr.side == 1)
+            next_track = thdr.track + 1;
+
+        var next_sector = 1;
+        for (var sec = 0; sec < thdr.nr_sectors; sec++) {
+            var shdr = TD_sector_hdr @ offset;
+            offset += shdr'size;
+
+            if (shdr.sector != next_sector) {
+                printf "Sector %u8d/%u8d/%u8d has gap in numbering (expected %u8d, actual %u8d)\n",
+                       thdr.track, thdr.side, shdr.sector, next_sector, shdr.sector;
+            }
+            if (shdr.track != thdr.track) {
+                printf "Sector %u8d/%u8d/%u8d has custom track number %u8d\n",
+                       thdr.track, thdr.side, shdr.sector, shdr.track;
+            }
+            if (shdr.side != thdr.side) {
+                printf "Sector %u8d/%u8d/%u8d has custom side number %u8d\n",
+                       thdr.track, thdr.side, shdr.sector, shdr.side;
+            }
+            if (shdr.flags) {
+                printf "Sector %u8d/%u8d/%u8d has flags %u8d\n",
+                       thdr.track, thdr.side, shdr.sector, shdr.flags;
+            }
+            if (prev_sec_size && shdr.sector_size != prev_sec_size){
+                printf "Size of sector changed on sector %u8d/%u8d/%u8d from %u16d to %u16d\n",
+                       thdr.track, thdr.side, shdr.sector,
+                       prev_sec_size, shdr.sector_size;
+            }
+            next_sector = shdr.sector + 1;
+            prev_sec_size = shdr.sector_size;
+
+            var sdhdr = TD_sector_data_hdr @ offset;
+            offset += sdhdr'size;
+            offset += (sdhdr.len - 1)#B;
+        }
+    }
+} catch (Exception e) {
+    if (e == E_constraint)
+        printf "error: `%s' is not a valid Teledisk image\n", filename;
+    else if (e == E_io)
+        printf "error: couldn't open file `%s'\n", filename;
+    else
+        raise e;
+
+    exit(1);
+}

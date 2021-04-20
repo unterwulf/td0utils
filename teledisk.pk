@@ -1,0 +1,189 @@
+/* teledisk.pk - TeleDisk support for GNU poke.  */
+/* (c) 2021 Vitaly Sinilin.  */
+
+type TD_img_hdr = struct
+{
+    byte[2] sign = ['T', 'D'];
+    uint<8> seq;
+    uint<8> chk_seq;
+    uint<8> version;
+    uint<8> data_rate;
+    uint<8> drv_type;
+    bit     has_comment;
+    uint<5> padding;
+    uint<2> stepping;
+    uint<8> dos_alloc_flag;
+    uint<8> sides;
+    little uint<16> crc;
+
+    method data_rate_str = string:
+    {
+        if (data_rate == 0)
+            return "250kbps";
+        else if (data_rate == 1)
+            return "300kbps";
+        else if (data_rate == 2)
+            return "500kbps";
+        else
+            return "invalid";
+    }
+
+    method drv_type_str = string:
+    {
+        if (drv_type == 0)
+            return "[0] 5.25 96 tpi disk in 48 tpi drive";
+        else if (drv_type == 1)
+            return "[1] 5.25";
+        else if (drv_type == 2)
+            return "[2] 5.25 48-tpi";
+        else if (drv_type == 3)
+            return "[3] 3.5";
+        else if (drv_type == 4)
+            return "[4] 3.5";
+        else if (drv_type == 5)
+            return "[5] 8-inch";
+        else if (drv_type == 6)
+            return "[6] 3.5";
+        else
+            return "invalid";
+    }
+
+    method dos_alloc_flag_str = string:
+    {
+        return dos_alloc_flag ? "Used" : "Not used";
+    }
+
+    method stepping_str = string:
+    {
+        if (stepping == 0)
+            return "Single-step";
+        else if (stepping == 1)
+            return "Double-step";
+        else if (stepping == 2)
+            return "Even-only step (96 tpi disk in 48 tpi drive)";
+        else
+            return "invalid";
+    }
+
+    method _print = void:
+    {
+        printf "Version: %u8d\n", version;
+        printf "Data rate: %s\n", data_rate_str;
+        printf "Drive type: %s\n", drv_type_str;
+        printf "Has comment: %s\n", has_comment ? "yes" : "no";
+        printf "Stepping: %s\n", stepping_str;
+        printf "FAT table: %s\n", dos_alloc_flag_str;
+        printf "Sides: %u8d\n", sides;
+    }
+};
+
+type TD_comment_hdr = struct
+{
+    little uint<16> crc;
+    little uint<16> len;
+    uint<8>         year;
+    uint<8>         month;
+    uint<8>         day;
+    uint<8>         hour;
+    uint<8>         minute;
+    uint<8>         second;
+    char[len]       comment;
+
+    method comment_str = string:
+    {
+        var str = unmap(comment);
+        for (var i = 0; i < str'length; i++)
+            if (str[i] == '\0')
+                str[i] = '\n';
+        return catos(str);
+    }
+
+    method full_year = uint<16>: { return 1900 + year; }
+
+    method _print = void:
+    {
+        printf "Date: %u16d-%u8d-%u8d %u8d:%u8d:%u8d\n",
+               full_year, month, day,
+               hour, minute, second;
+        printf "Comment: %s\n", comment_str;
+    }
+};
+
+type TD_track_hdr = struct
+{
+    uint<8> nr_sectors;
+    uint<8> track;
+    uint<8> side;
+    uint<8> crc;
+
+    method _print = void:
+    {
+        printf "Track: %u8d", track;
+        printf " Side: %u8d", side;
+        printf " Sectors: %u8d\n", nr_sectors;
+    }
+};
+
+type TD_sector_hdr = struct
+{
+    uint<8> track;
+    uint<8> side;
+    uint<8> sector;
+    uint<8> size;
+    uint<8> flags;
+    uint<8> crc;
+
+    method sector_size = uint<16>: { return 128 <<. size; }
+
+    method _print = void:
+    {
+        printf "Track: %u8d", track;
+        printf " Side: %u8d", side;
+        printf " Sector: %u8d", sector;
+        printf " Size: %u16d bytes", sector_size;
+        printf " Flags: %u8d\n", flags;
+    }
+};
+
+type TD_sector_data_hdr = struct
+{
+    little uint<16> len;
+    uint<8> enc;
+
+    method enc_str = string:
+    {
+        if (enc == 0)
+            return "0 (raw sector data)";
+        else if (enc == 1)
+            return "1 (repeated 2-byte pattern)";
+        else if (enc == 2)
+            return "2 (RLE data)";
+        else
+            return ltos(enc) + " (unknown)";
+    }
+
+    method _print = void:
+    {
+        printf "Len: %u16d", len;
+        printf " Enc: %s\n", enc_str;
+    }
+};
+
+type TD_data_enc_1 = struct
+{
+    little uint<16> count;
+    byte[2]         pattern;
+};
+
+type TD_data_enc_2 = struct
+{
+    uint<8> a;
+    uint<8> b;
+
+    method len = offset<uint<16>,B>:
+    {
+        return (a ? (a * 2HU) : b as uint<16>)#B;
+    }
+
+    method count = uint<8>: { return a ? b : 1BU; }
+};

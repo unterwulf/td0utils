@@ -1,0 +1,54 @@
+#!/usr/bin/poke -L
+!#
+/* (c) 2021 Vitaly Sinilin.  */
+
+load teledisk;
+
+if (argv'length != 1) {
+    print "usage: dump_td0 IMAGE.td0\n";
+    exit(1);
+}
+
+var filename = argv[0];
+
+try {
+    var fd = open(filename, IOS_M_RDONLY);
+    var ihdr = TD_img_hdr @ fd : 0#B;
+    var offset = ihdr'size;
+    ihdr._print;
+    if (ihdr.has_comment) {
+        var chdr = TD_comment_hdr @ offset;
+        chdr._print;
+        offset += chdr'size;
+    }
+    print "\n";
+
+    while (offset < iosize(fd)) {
+        var thdr = TD_track_hdr @ offset;
+        offset += thdr'size;
+        if (thdr.nr_sectors == 255)
+            continue;
+        thdr._print;
+        print "\n";
+
+        for (var sec = 0; sec < thdr.nr_sectors; sec++) {
+            var shdr = TD_sector_hdr @ offset;
+            shdr._print;
+            offset += shdr'size;
+            var sdhdr = TD_sector_data_hdr @ offset;
+            sdhdr._print;
+            offset += sdhdr'size;
+            offset += (sdhdr.len - 1)#B;
+        }
+        print "\n";
+    }
+} catch (Exception e) {
+    if (e == E_constraint)
+        printf "error: `%s' is not a valid Teledisk image\n", filename;
+    else if (e == E_io)
+        printf "error: couldn't open file `%s'\n", filename;
+    else
+        raise e;
+
+    exit(1);
+}
